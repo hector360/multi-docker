@@ -1,0 +1,39 @@
+name: Deploy MultiDocker
+on:
+  push:
+    branches:
+      - master # check your repo, your default branch might be master!
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+      - run: docker build -t hector360m/react-test -f ./client/Dockerfile.dev ./client
+      - run: docker run -e CI=true hector360m/react-test npm test
+
+      - run: docker build -t hector360m/multi-client ./client
+      - run: docker build -t hector360m/multi-nginx ./nginx
+      - run: docker build -t hector360m/multi-server ./server
+      - run: docker build -t hector360m/multi-worker ./worker
+
+      - run: docker push hector360m/multi-client
+      - run: docker push hector360m/multi-nginx
+      - run: docker push hector360m/multi-server
+      - run: docker push hector360m/multi-worker
+
+      - name: Generate deployment package
+        run: zip -r deploy.zip . -x '*.git*'
+
+      - name: Deploy to EB
+        uses: einaregilsson/beanstalk-deploy@v18
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_KEY }}
+          application_name: ${{ secrets.EB_APPLICATION_NAME }}
+          environment_name: ${{ secrets.EB_ENVIRONMENT_NAME }}
+          existing_bucket_name: elasticbeanstalk-${{ secrets.AWS_REGION }}-783764585881
+          region: ${{ secrets.AWS_REGION }}
+          version_label: ${{ github.sha }}
+          deployment_package: deploy.zip
