@@ -31,27 +31,46 @@ pgClient.on('connect', (client) => {
 
 // Redis Client Setup
 const redis = require('redis');
+
 const redisClient = redis.createClient({
   host: keys.redisHost,
   port: keys.redisPort,
   retry_strategy: () => 1000,
 });
-const redisPublisher = redisClient.duplicate();
+
+// Manejo de errores de Redis
+redisClient.on('error', (err) => {
+  console.error('Redis Client Error', err);
+});
+
+// Duplicamos la conexión para el publicador
+const redisPublisher = redis.createClient({
+  host: keys.redisHost,
+  port: keys.redisPort,
+  retry_strategy: () => 1000,
+});
 
 // Express route handlers
-
 app.get('/', (req, res) => {
   res.send('Hi');
 });
 
 app.get('/values/all', async (req, res) => {
-  const values = await pgClient.query('SELECT * from values');
-
-  res.send(values.rows);
+  try {
+    const values = await pgClient.query('SELECT * from values');
+    res.send(values.rows);
+  } catch (err) {
+    console.error('Error al obtener valores de PostgreSQL:', err);
+    res.status(500).send('Error en el servidor');
+  }
 });
 
-app.get('/values/current', async (req, res) => {
+app.get('/values/current', (req, res) => {
   redisClient.hgetall('values', (err, values) => {
+    if (err) {
+      console.error('Error al obtener valores de Redis:', err);
+      return res.status(500).send('Error en Redis');
+    }
     res.send(values);
   });
 });
@@ -63,13 +82,23 @@ app.post('/values', async (req, res) => {
     return res.status(422).send('Index too high');
   }
 
-  redisClient.hset('values', index, 'Nothing yet!');
-  redisPublisher.publish('insert', index);
-  pgClient.query('INSERT INTO values(number) VALUES($1)', [index]);
+  redisClient.hset('values', index, 'Nothing yet!', (err) => {
+    if (err) console.error('Error al guardar en Redis:', err);
+  });
+
+  redisPublisher.publish('insert', index, (err) => {
+    if (err) console.error('Error al publicar en Redis:', err);
+  });
+
+  try {
+    await pgClient.query('INSERT INTO values(number) VALUES($1)', [index]);
+  } catch (err) {
+    console.error('Error al insertar en PostgreSQL:', err);
+  }
 
   res.send({ working: true });
 });
 
-app.listen(5000, (err) => {
-  console.log('Listening');
+app.listen(5000, () => {
+  console.log('Listening on port 5000');
 });
