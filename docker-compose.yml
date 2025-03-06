@@ -8,6 +8,8 @@ services:
     image: 'hector360m/multi-server'
     mem_limit: 128m
     hostname: api
+    ports:
+      - "5000:5000"
     environment:
       - REDIS_HOST=$REDIS_HOST
       - REDIS_PORT=$REDIS_PORT
